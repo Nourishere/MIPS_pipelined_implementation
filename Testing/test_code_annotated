@@ -1,0 +1,56 @@
+    #mem[0]= 5
+    #mem[4] 10
+    #mem[8] -3
+    #mem[12] 42
+    #mem[16] 100
+    #mem[20] 0xFFFFFFFF   # -1
+
+.text
+.globl __start
+__start:
+
+    # === Load-use hazard (should stall if no mem->EX forwarding) ===
+    lw $t1, 0($t0)       # $t1 = 5
+    add $t2, $t1, $t1    # Use $t1 right after load → stall needed
+
+    # === RAW hazard with arithmetic (should be handled via forwarding) ===
+    add $t3, $t2, $t1    # $t3 = t2 + t1
+    sub $t4, $t3, $t2    # $t4 = t3 - t2 → RAW on $t3
+    and $t5, $t4, $t3    # $t5 = t4 & t3 → RAW on $t4
+
+    # === Store and load from same location (data memory test) ===
+    sw $t5, 4($t0)       # MEM[1] = $t5
+    lw $t6, 4($t0)       # $t6 = MEM[1] (should be $t5)
+
+    # === Control hazard (beq taken/not taken, next instruction should be flushed) ===
+    add $s0, $zero, $t1  # $s0 = 5
+    add $s1, $zero, $t1  # $s1 = 5
+
+    beq $s0, $s1, branch_taken   # taken → instruction after this should be flushed
+    add $s2, $zero, $zero        # should be flushed (not executed)
+
+branch_taken:
+    or $s3, $s0, $s1      # should execute normally
+
+    # === Control hazard (beq not taken) ===
+    sub $s4, $t1, $t2     # $s4 = 5 - 10 = -5
+    sub $s5, $t1, $t1     # $s5 = 0
+
+    beq $s4, $s5, skip    # not taken
+    add $s6, $t1, $t1     # executed
+
+skip:
+    # === RAW + control ===
+    add $s7, $t1, $t1     # $s7 = 10
+    beq $s7, $t2, after   # $s7 == $t2? should NOT be equal (10 vs 10) → taken
+    add $t7, $zero, $zero  # should be flushed
+
+after:
+    add $t8, $zero, $t7   # last visible op
+
+    j done
+    add $t9, $t9, $t9     # skipped
+
+done:
+    add $t9, $zero, $zero # HALT or END
+
